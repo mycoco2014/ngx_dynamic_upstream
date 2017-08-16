@@ -117,7 +117,7 @@ ngx_dynamic_upstream_create_response_buf(ngx_http_request_t *r, ngx_http_upstrea
     // upstream name
     ngx_cpystrn(namebuf, peers->name->data, peers->name->len + 1);
 
-    b->last = ngx_snprintf(b->last, last - b->last, "{\"upstream:\":\"%s\",\"backup\":0,\"number\":%d,\"server\":[", namebuf, peers->number );
+    b->last = ngx_snprintf(b->last, last - b->last, "{\"upstream\":\"%s\",\"backup\":0,\"number\":%d,\"server\":[", namebuf, peers->number );
     for (peer = peers->peer; peer; peer = peer->next) {
         if (peer->name.len > 511) {
             return NGX_ERROR;
@@ -159,7 +159,7 @@ ngx_dynamic_upstream_backup_create_response_buf(ngx_http_request_t *r, ngx_http_
     }
 
     ngx_cpystrn(namebuf, peers->name->data, peers->name->len + 1);
-    b->last = ngx_snprintf(b->last, last - b->last, "{\"upstream:\":\"%s\",\"backup\":1,\"number\":%d,\"server\":[", namebuf, peers->next->number );
+    b->last = ngx_snprintf(b->last, last - b->last, "{\"upstream\":\"%s\",\"backup\":1,\"number\":%d,\"server\":[", namebuf, peers->next->number );
 
     // backup 在peers -> next 里面
     for (peer = peers->next->peer; peer; peer = peer->next) {
@@ -203,9 +203,12 @@ ngx_dynamic_upstream_zones_response_buf(ngx_http_request_t *r, ngx_http_upstream
 
     ngx_http_upstream_srv_conf_t   *uscf, **uscfp;
     u_char                        namebuf[512], *last;
-    size_t                        i;
+    size_t                        i, idx;
     last = b->last + size;
     uscfp = umcf->upstreams.elts;
+
+    idx = 0;
+    b->last = ngx_snprintf(b->last, last - b->last, "{\"zones\":[");
     for (i = 0; i < umcf->upstreams.nelts; i++) {
         uscf = uscfp[i];
         if (uscf->shm_zone != NULL) {
@@ -213,10 +216,15 @@ ngx_dynamic_upstream_zones_response_buf(ngx_http_request_t *r, ngx_http_upstream
                 return NGX_ERROR;
             }
             ngx_cpystrn(namebuf, uscf->shm_zone->shm.name.data, uscf->shm_zone->shm.name.len + 1);
-
-            b->last = ngx_snprintf(b->last, last - b->last, "zone %s\n", namebuf);
+            if (idx == 0) {
+                b->last = ngx_snprintf(b->last, last - b->last, "\"%s\"", namebuf);
+            } else {
+                b->last = ngx_snprintf(b->last, last - b->last, ",\"%s\"", namebuf);
+            }
+            idx++;
         }
     }
+    b->last = ngx_snprintf(b->last, last - b->last, "],\"number\":%d}",idx);
     return NGX_OK;
 }
 

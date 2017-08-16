@@ -209,24 +209,24 @@ ngx_dynamic_upstream_op(ngx_http_request_t *r, ngx_dynamic_upstream_op_t *op,
     rc = NGX_OK;
 
     switch (op->op) {
-    case NGX_DYNAMIC_UPSTEAM_OP_ADD:
-        rc = ngx_dynamic_upstream_op_add(r, op, shpool, uscf);
-        break;
-    case NGX_DYNAMIC_UPSTEAM_OP_REMOVE:
-        rc = ngx_dynamic_upstream_op_remove(r, op, shpool, uscf);
-        break;
-#if 0
-    case NGX_DYNAMIC_UPSTEAM_OP_BACKUP:
-        break;
-#endif
-    case NGX_DYNAMIC_UPSTEAM_OP_PARAM:
-        rc = ngx_dynamic_upstream_op_update_param(r, op, shpool, uscf);
-        break;
-    case NGX_DYNAMIC_UPSTEAM_OP_LIST:
-    default:
-        rc = NGX_OK;
-        break;
-    }
+        case NGX_DYNAMIC_UPSTEAM_OP_ADD:
+            rc = ngx_dynamic_upstream_op_add(r, op, shpool, uscf);
+            break;
+        case NGX_DYNAMIC_UPSTEAM_OP_REMOVE:
+            rc = ngx_dynamic_upstream_op_remove(r, op, shpool, uscf);
+            break;
+    #if 0
+        case NGX_DYNAMIC_UPSTEAM_OP_BACKUP:
+            break;
+    #endif
+        case NGX_DYNAMIC_UPSTEAM_OP_PARAM:
+            rc = ngx_dynamic_upstream_op_update_param(r, op, shpool, uscf);
+            break;
+        case NGX_DYNAMIC_UPSTEAM_OP_LIST:
+        default:
+            rc = NGX_OK;
+            break;
+        }
 
     return rc;
 }
@@ -241,7 +241,16 @@ ngx_dynamic_upstream_op_add(ngx_http_request_t *r, ngx_dynamic_upstream_op_t *op
     ngx_url_t                      u;
 
     peers = uscf->peer.data;
-    for (peer = peers->peer, last = peer; peer; peer = peer->next) {
+    if(op->server_list){
+        peer = peers->peer;
+    } else if (op->server_backup_list) {
+        // backup
+        peer = peers->next->peer;
+    } else {
+        return NGX_ERROR;
+    }
+
+    for (last = peer; peer; peer = peer->next) {
         if (op->server.len == peer->name.len && ngx_strncmp(op->server.data, peer->name.data, peer->name.len) == 0) {
             op->status = NGX_HTTP_BAD_REQUEST;
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
@@ -341,6 +350,14 @@ ngx_dynamic_upstream_op_remove(ngx_http_request_t *r, ngx_dynamic_upstream_op_t 
     ngx_uint_t                     weight;
 
     peers = uscf->peer.data;
+    if(op->server_list){
+        peer = peers->peer;
+    } else if (op->server_backup_list) {
+        // backup
+        peer = peers->next->peer;
+    } else {
+        return NGX_ERROR;
+    }
 
     if (peers->number < 2) {
         op->status = NGX_HTTP_BAD_REQUEST;
@@ -349,7 +366,7 @@ ngx_dynamic_upstream_op_remove(ngx_http_request_t *r, ngx_dynamic_upstream_op_t 
 
     target = NULL;
     prev = NULL;
-    for (peer = peers->peer; peer ; peer = peer->next) {
+    for (; peer ; peer = peer->next) {
         if (op->server.len == peer->name.len && ngx_strncmp(op->server.data, peer->name.data, peer->name.len) == 0) {
             target = peer;
             peer = peer->next;
@@ -416,9 +433,17 @@ ngx_dynamic_upstream_op_update_param(ngx_http_request_t *r, ngx_dynamic_upstream
     ngx_http_upstream_rr_peers_t  *peers;
 
     peers = uscf->peer.data;
+    if(op->server_list){
+        peer = peers->peer;
+    } else if (op->server_backup_list) {
+        // backup
+        peer = peers->next->peer;
+    } else {
+        return NGX_ERROR;
+    }
 
     target = NULL;
-    for (peer = peers->peer; peer ; peer = peer->next) {
+    for (; peer ; peer = peer->next) {
         if (op->server.len == peer->name.len && ngx_strncmp(op->server.data, peer->name.data, peer->name.len) == 0) {
             target = peer;
             break;
