@@ -9,6 +9,8 @@
 
 
 static const ngx_str_t ngx_dynamic_upstream_params[] = {
+    // 是否显示 zone 列表
+    ngx_string("arg_zones"),
     ngx_string("arg_upstream"),
     ngx_string("arg_verbose"),
     ngx_string("arg_add"),
@@ -84,10 +86,11 @@ ngx_dynamic_upstream_build_op(ngx_http_request_t *r, ngx_dynamic_upstream_op_t *
         var = ngx_http_get_variable(r, &args[i], key);
 
         if (!var->not_found) {
-            if (ngx_strcmp("arg_upstream", args[i].data) == 0) {
+            if (ngx_strcmp("arg_zones",args[i].data) == 0) {
+                op->zones = 1;
+            } else if (ngx_strcmp("arg_upstream", args[i].data) == 0) {
                 op->upstream.data = var->data;
                 op->upstream.len = var->len;
-
             } else if (ngx_strcmp("arg_verbose", args[i].data) == 0) {
                 op->verbose = 1;
 
@@ -151,13 +154,11 @@ ngx_dynamic_upstream_build_op(ngx_http_request_t *r, ngx_dynamic_upstream_op_t *
                 op->op |= NGX_DYNAMIC_UPSTEAM_OP_PARAM;
                 op->op_param |= NGX_DYNAMIC_UPSTEAM_OP_PARAM_UP;
                 op->verbose = 1;
-
             } else if (ngx_strcmp("arg_down", args[i].data) == 0) {
                 op->down = 1;
                 op->op |= NGX_DYNAMIC_UPSTEAM_OP_PARAM;
                 op->op_param |= NGX_DYNAMIC_UPSTEAM_OP_PARAM_DOWN;
                 op->verbose = 1;
-                
             }
         }
     }

@@ -54,6 +54,16 @@ server {
 
 You can operate upstreams dynamically with HTTP APIs.
 
+## zones
+
+```bash
+$ curl "http://127.0.0.1:6000/dynamic?zones="
+zone zone_for_backends1
+zone zone_for_backends2
+zone zone_for_backends3
+$
+```
+
 ## list
 
 ```bash

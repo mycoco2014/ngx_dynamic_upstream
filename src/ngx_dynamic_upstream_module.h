@@ -22,6 +22,8 @@
 
 
 typedef struct ngx_dynamic_upstream_op_t {
+    // 添加是否显示 zone 列表
+    ngx_uint_t zones;
     ngx_int_t verbose;
     ngx_int_t op;
     ngx_int_t op_param;

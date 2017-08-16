@@ -8,8 +8,16 @@
 
 static ngx_http_upstream_srv_conf_t *
 ngx_dynamic_upstream_get_zone(ngx_http_request_t *r, ngx_dynamic_upstream_op_t *op);
+
 static ngx_int_t
 ngx_dynamic_upstream_create_response_buf(ngx_http_upstream_rr_peers_t *peers, ngx_buf_t *b, size_t size, ngx_int_t verbose);
+
+static ngx_int_t
+ngx_dynamic_upstream_zones_response_buf(ngx_http_upstream_main_conf_t *umcf, ngx_buf_t *b, size_t size);
+
+static ngx_int_t
+ngx_dynamic_upstream_zones_buf_size(ngx_http_upstream_main_conf_t *umcf);
+
 static ngx_int_t
 ngx_dynamic_upstream_handler(ngx_http_request_t *r);
 static char *
@@ -82,8 +90,7 @@ ngx_dynamic_upstream_get_zone(ngx_http_request_t *r, ngx_dynamic_upstream_op_t *
     }
 
     return NULL;
-}    
-
+}
 
 static ngx_int_t
 ngx_dynamic_upstream_create_response_buf(ngx_http_upstream_rr_peers_t *peers, ngx_buf_t *b, size_t size, ngx_int_t verbose)
@@ -116,6 +123,45 @@ ngx_dynamic_upstream_create_response_buf(ngx_http_upstream_rr_peers_t *peers, ng
     return NGX_OK;
 }
 
+static ngx_int_t
+ngx_dynamic_upstream_zones_buf_size(ngx_http_upstream_main_conf_t *umcf){
+    ngx_http_upstream_srv_conf_t   *uscf, **uscfp;
+    size_t                         i,size;
+    size = 0;
+    uscfp = umcf->upstreams.elts;
+    for (i = 0; i < umcf->upstreams.nelts; i++) {
+        uscf = uscfp[i];
+        if (uscf->shm_zone != NULL) {
+            if (uscf->shm_zone->shm.size) {
+                size = size + uscf->shm_zone->shm.size;
+            }
+        }
+    }
+    return size;
+}
+
+static ngx_int_t
+ngx_dynamic_upstream_zones_response_buf(ngx_http_upstream_main_conf_t *umcf, ngx_buf_t *b, size_t size)
+{
+
+    ngx_http_upstream_srv_conf_t   *uscf, **uscfp;
+    u_char                        namebuf[512], *last;
+    size_t                        i;
+    last = b->last + size;
+    uscfp = umcf->upstreams.elts;
+    for (i = 0; i < umcf->upstreams.nelts; i++) {
+        uscf = uscfp[i];
+        if (uscf->shm_zone != NULL) {
+            if (uscf->shm_zone->shm.name.len > 511) {
+                return NGX_ERROR;
+            }
+            ngx_cpystrn(namebuf, uscf->shm_zone->shm.name.data, uscf->shm_zone->shm.name.len + 1);
+
+            b->last = ngx_snprintf(b->last, last - b->last, "zone %s\n", namebuf);
+        }
+    }
+    return NGX_OK;
+}
 
 static ngx_int_t
 ngx_dynamic_upstream_handler(ngx_http_request_t *r)
@@ -127,6 +173,7 @@ ngx_dynamic_upstream_handler(ngx_http_request_t *r)
     ngx_buf_t                      *b;
     ngx_http_upstream_srv_conf_t   *uscf;
     ngx_slab_pool_t                *shpool;
+    ngx_http_upstream_main_conf_t  *umcf;
     
     if (r->method != NGX_HTTP_GET && r->method != NGX_HTTP_HEAD) {
         return NGX_HTTP_NOT_ALLOWED;
@@ -159,7 +206,51 @@ ngx_dynamic_upstream_handler(ngx_http_request_t *r)
         }
         return op.status;
     }
-    
+    // 只显示zone列表
+    if(op.zones == 1) {
+        // 添加自定义逻辑
+        umcf  = ngx_http_get_module_main_conf(r, ngx_http_upstream_module);
+        size = ngx_dynamic_upstream_zones_buf_size(umcf);
+
+        if (size == 0) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                          "upstream zone is not found. %s:%d",
+                          __FUNCTION__,
+                          __LINE__);
+            return NGX_HTTP_NOT_FOUND;
+        }
+
+        b = ngx_create_temp_buf(r->pool, size);
+        if (b == NULL) {
+            return NGX_HTTP_INTERNAL_SERVER_ERROR;
+        }
+
+        out.buf = b;
+        out.next = NULL;
+        rc = ngx_dynamic_upstream_zones_response_buf((ngx_http_upstream_main_conf_t *)umcf, b, size);
+        if (rc == NGX_ERROR) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                          "failed to create a response. %s:%d",
+                          __FUNCTION__,
+                          __LINE__);
+            return NGX_HTTP_INTERNAL_SERVER_ERROR;
+        }
+
+        r->headers_out.status = NGX_HTTP_OK;
+        r->headers_out.content_length_n = b->last - b->pos;
+
+        b->last_buf = (r == r->main) ? 1 : 0;
+        b->last_in_chain = 1;
+
+        rc = ngx_http_send_header(r);
+
+        if (rc == NGX_ERROR || rc > NGX_OK || r->header_only) {
+            return rc;
+        }
+
+        return ngx_http_output_filter(r, &out);
+    }
+
     uscf = ngx_dynamic_upstream_get_zone(r, &op);
     if (uscf == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
