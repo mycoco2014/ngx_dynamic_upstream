@@ -11,7 +11,8 @@
 static const ngx_str_t ngx_dynamic_upstream_params[] = {
     // 是否显示 zone 列表
     ngx_string("arg_zones"),
-    ngx_string("arg_upstream"),
+    ngx_string("arg_upstream_list"),
+    ngx_string("arg_upstream_backup_list"),
     ngx_string("arg_verbose"),
     ngx_string("arg_add"),
     ngx_string("arg_remove"),
@@ -88,12 +89,16 @@ ngx_dynamic_upstream_build_op(ngx_http_request_t *r, ngx_dynamic_upstream_op_t *
         if (!var->not_found) {
             if (ngx_strcmp("arg_zones",args[i].data) == 0) {
                 op->zones = 1;
-            } else if (ngx_strcmp("arg_upstream", args[i].data) == 0) {
+            } else if (ngx_strcmp("arg_upstream_list", args[i].data) == 0) {
                 op->upstream.data = var->data;
                 op->upstream.len = var->len;
+                op->server_list = 1;
+            } else if (ngx_strcmp("arg_upstream_backup_list", args[i].data) == 0) {
+                op->upstream.data = var->data;
+                op->upstream.len = var->len;
+                op->server_backup_list = 1;
             } else if (ngx_strcmp("arg_verbose", args[i].data) == 0) {
                 op->verbose = 1;
-
             } else if (ngx_strcmp("arg_add", args[i].data) == 0) {
                 op->op |= NGX_DYNAMIC_UPSTEAM_OP_ADD;
 

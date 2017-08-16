@@ -8,6 +8,8 @@
 
 typedef struct ngx_dynamic_upstream_op_t {
     ngx_uint_t zones;
+    ngx_uint_t server_list;
+    ngx_uint_t server_backup_list;
     ngx_int_t verbose;
     ngx_int_t op;
     ngx_int_t op_param;

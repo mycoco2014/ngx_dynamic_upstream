@@ -9,11 +9,16 @@
 static ngx_http_upstream_srv_conf_t *
 ngx_dynamic_upstream_get_zone(ngx_http_request_t *r, ngx_dynamic_upstream_op_t *op);
 
-static ngx_int_t
-ngx_dynamic_upstream_create_response_buf(ngx_http_upstream_rr_peers_t *peers, ngx_buf_t *b, size_t size, ngx_int_t verbose);
 
 static ngx_int_t
-ngx_dynamic_upstream_zones_response_buf(ngx_http_upstream_main_conf_t *umcf, ngx_buf_t *b, size_t size);
+ngx_dynamic_upstream_create_response_buf(ngx_http_request_t *r, ngx_http_upstream_rr_peers_t *peers, ngx_buf_t *b, size_t size, ngx_int_t verbose);
+
+static ngx_int_t
+ngx_dynamic_upstream_backup_create_response_buf(ngx_http_request_t *r, ngx_http_upstream_rr_peers_t *peers, ngx_buf_t *b, size_t size, ngx_int_t verbose);
+
+
+static ngx_int_t
+ngx_dynamic_upstream_zones_response_buf(ngx_http_request_t *r, ngx_http_upstream_main_conf_t *umcf, ngx_buf_t *b, size_t size);
 
 static ngx_int_t
 ngx_dynamic_upstream_zones_buf_size(ngx_http_upstream_main_conf_t *umcf);
@@ -93,7 +98,10 @@ ngx_dynamic_upstream_get_zone(ngx_http_request_t *r, ngx_dynamic_upstream_op_t *
 }
 
 static ngx_int_t
-ngx_dynamic_upstream_create_response_buf(ngx_http_upstream_rr_peers_t *peers, ngx_buf_t *b, size_t size, ngx_int_t verbose)
+ngx_dynamic_upstream_create_response_buf(ngx_http_request_t *r, ngx_http_upstream_rr_peers_t *peers,
+    ngx_buf_t *b,
+    size_t size,
+    ngx_int_t verbose)
 {
     ngx_http_upstream_rr_peer_t  *peer;
     u_char                        namebuf[512], *last;
@@ -107,19 +115,48 @@ ngx_dynamic_upstream_create_response_buf(ngx_http_upstream_rr_peers_t *peers, ng
         }
 
         ngx_cpystrn(namebuf, peer->name.data, peer->name.len + 1);
-
         if (verbose) {
-            b->last = ngx_snprintf(b->last, last - b->last, "server %s weight=%d max_fails=%d fail_timeout=%d",
-                                   namebuf, peer->weight, peer->max_fails, peer->fail_timeout, peer->down);
-
+            if (peer->down) {
+                b->last = ngx_snprintf(b->last, last - b->last, "server %s weight=%d max_fails=%d fail_timeout=%d down;",
+                                               namebuf, peer->weight, peer->max_fails, peer->fail_timeout);
+            } else {
+                b->last = ngx_snprintf(b->last, last - b->last, "server %s weight=%d max_fails=%d fail_timeout=%d;\n",
+                                               namebuf, peer->weight, peer->max_fails, peer->fail_timeout);
+            }
         } else {
-            b->last = ngx_snprintf(b->last, last - b->last, "server %s", namebuf);
-
+            b->last = ngx_snprintf(b->last, last - b->last, "server %s;\n", namebuf);
         }
-
-        b->last = peer->down ? ngx_snprintf(b->last, last - b->last, " down;\n") : ngx_snprintf(b->last, last - b->last, ";\n");
     }
+    return NGX_OK;
+}
 
+// 获取backup服务器列表
+static ngx_int_t
+ngx_dynamic_upstream_backup_create_response_buf(ngx_http_request_t *r, ngx_http_upstream_rr_peers_t *peers, ngx_buf_t *b, size_t size, ngx_int_t verbose){
+    ngx_http_upstream_rr_peer_t  *peer;
+    u_char                        namebuf[512], *last;
+    size_t                        idx;
+
+    idx = 0;
+    last = b->last + size;
+
+    // backup 在peers -> next 里面
+    b->last = ngx_snprintf(b->last, last - b->last, "[");
+    for (peer = peers->next->peer; peer; peer = peer->next) {
+        if (peer->name.len > 511) {
+            return NGX_ERROR;
+        }
+        ngx_cpystrn(namebuf, peer->name.data, peer->name.len + 1);
+        if (idx == 0) {
+            b->last = ngx_snprintf(b->last, last - b->last, "{\"backup\":1,\"server\":\"%s\",\"weight\":%d,\"max_fails\":%d,\"fail_timeout\":%d}",
+                                                   namebuf, peer->weight, peer->max_fails, peer->fail_timeout );
+        } else {
+            b->last = ngx_snprintf(b->last, last - b->last, ",{\"backup\":1,\"server\":\"%s\",\"weight\":%d,\"max_fails\":%d,\"fail_timeout\":%d}",
+                                                   namebuf, peer->weight, peer->max_fails, peer->fail_timeout );
+        }
+        idx++;
+    }
+    b->last = ngx_snprintf(b->last, last - b->last, "]");
     return NGX_OK;
 }
 
@@ -141,7 +178,7 @@ ngx_dynamic_upstream_zones_buf_size(ngx_http_upstream_main_conf_t *umcf){
 }
 
 static ngx_int_t
-ngx_dynamic_upstream_zones_response_buf(ngx_http_upstream_main_conf_t *umcf, ngx_buf_t *b, size_t size)
+ngx_dynamic_upstream_zones_response_buf(ngx_http_request_t *r, ngx_http_upstream_main_conf_t *umcf, ngx_buf_t *b, size_t size)
 {
 
     ngx_http_upstream_srv_conf_t   *uscf, **uscfp;
@@ -227,7 +264,7 @@ ngx_dynamic_upstream_handler(ngx_http_request_t *r)
 
         out.buf = b;
         out.next = NULL;
-        rc = ngx_dynamic_upstream_zones_response_buf((ngx_http_upstream_main_conf_t *)umcf, b, size);
+        rc = ngx_dynamic_upstream_zones_response_buf(r, (ngx_http_upstream_main_conf_t *)umcf, b, size);
         if (rc == NGX_ERROR) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                           "failed to create a response. %s:%d",
@@ -284,7 +321,11 @@ ngx_dynamic_upstream_handler(ngx_http_request_t *r)
     out.buf = b;
     out.next = NULL;
 
-    rc = ngx_dynamic_upstream_create_response_buf((ngx_http_upstream_rr_peers_t *)uscf->peer.data, b, size, op.verbose);
+    if ( op.server_list == 1 ) {
+        rc = ngx_dynamic_upstream_create_response_buf(r, (ngx_http_upstream_rr_peers_t *)uscf->peer.data, b, size, op.verbose);
+    } else {
+        rc = ngx_dynamic_upstream_backup_create_response_buf(r, (ngx_http_upstream_rr_peers_t *)uscf->peer.data, b, size, op.verbose);
+    }
 
     if (rc == NGX_ERROR) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
